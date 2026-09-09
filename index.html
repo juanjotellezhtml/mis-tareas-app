@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#111827">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Mis Tareas</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div id="app" class="app">
+
+  <!-- ============ SCREEN: LOGIN ============ -->
+  <section id="screen-login" class="screen">
+    <div class="login-box">
+      <div class="logo">T</div>
+      <h1>Mis Tareas</h1>
+      <p class="tagline">Convierte documentos e ideas en tareas reales</p>
+
+      <div class="field">
+        <label>Pat de GitHub</label>
+        <input type="password" id="github-token" placeholder="ghp_..." autocomplete="off">
+        <p class="hint">Para guardar tus tareas en tu repositorio privado</p>
+      </div>
+
+      <div class="field">
+        <label>Clave API de Gemini</label>
+        <input type="password" id="gemini-key" placeholder="AIzaSy..." autocomplete="off">
+        <p class="hint">Gratis en <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com</a></p>
+      </div>
+
+      <div class="field">
+        <label>Repo de GitHub (owner/repo)</label>
+        <input type="text" id="github-repo" placeholder="tuusuario/mis-tareas">
+        <p class="hint">Repo donde se guardan los datos compartidos</p>
+      </div>
+
+      <button id="btn-login" class="btn btn-primary btn-block">Entrar</button>
+      <div id="login-error" class="error"></div>
+    </div>
+  </section>
+
+  <!-- ============ SCREEN: APP (logged in) ============ -->
+  <section id="screen-app" class="screen hidden">
+
+    <!-- Header -->
+    <header class="app-header">
+      <button id="btn-menu" class="icon-btn" aria-label="Menú">☰</button>
+      <div class="header-title" id="header-title">Mis Tareas</div>
+      <div class="header-actions">
+        <span id="sync-indicator" class="sync-dot" title="Sincronizado"></span>
+        <button id="btn-user" class="icon-btn" aria-label="Usuario">👤</button>
+      </div>
+    </header>
+
+    <!-- Sidebar (drawer) -->
+    <nav id="sidebar" class="sidebar hidden">
+      <div class="sidebar-header">
+        <div class="user-info">
+          <div class="avatar" id="avatar">?</div>
+          <div>
+            <div class="user-name" id="user-name">Usuario</div>
+            <div class="user-login" id="user-login">@login</div>
+            <div class="user-repo" id="user-repo" title="Repositorio de datos"></div>
+          </div>
+        </div>
+        <button id="btn-close-sidebar" class="icon-btn">✕</button>
+      </div>
+      <div class="sidebar-nav">
+        <button class="nav-item" data-view="inbox"><span class="nav-icon">📥</span>Bandeja de entrada<span class="badge" id="badge-inbox"></span></button>
+        <button class="nav-item" data-view="chat"><span class="nav-icon">💬</span>Nueva tarea / Analizar</button>
+        <button class="nav-item" data-view="board"><span class="nav-icon">📋</span>Tablero de tareas</button>
+        <button class="nav-item" data-view="groups"><span class="nav-icon">👥</span>Grupos</button>
+        <button class="nav-item" data-view="settings"><span class="nav-icon">⚙️</span>Ajustes</button>
+      </div>
+      <div class="sidebar-footer">
+        <button id="btn-logout" class="nav-item"><span class="nav-icon">⏻</span>Cerrar sesión</button>
+      </div>
+    </nav>
+    <div id="sidebar-overlay" class="drawer-overlay hidden"></div>
+
+    <!-- Main content -->
+    <main class="app-main">
+
+      <!-- ===== VIEW: INBOX ===== -->
+      <section id="view-inbox" class="view"></section>
+
+      <!-- ===== VIEW: CHAT (analyze) ===== -->
+      <section id="view-chat" class="view">
+        <div class="chat-container">
+          <div id="chat-head" class="chat-head">
+            <h2>Nueva tarea</h2>
+            <p>Adjunta un documento o escribe tu objetivo. Conversaremos hasta acordar la tarea.</p>
+          </div>
+
+          <div id="chat-attach" class="chat-attach">
+            <div id="dropzone" class="dropzone">
+              <input type="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.txt,.doc,image/*" multiple hidden>
+              <div class="dz-content">
+                <div class="dz-icon">📎</div>
+                <p>Toca para adjuntar (PDF, imagen, texto)</p>
+                <p class="dz-hint">o usa la cámara del móvil</p>
+              </div>
+            </div>
+            <button id="btn-camera" class="btn btn-outline">📷 Cámara</button>
+            <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
+          </div>
+
+          <div id="chat-body" class="chat-body"></div>
+
+          <div class="chat-input">
+            <textarea id="chat-text" placeholder="Escribe tu mensaje u objetivo..." rows="2"></textarea>
+            <button id="btn-chat-send" class="btn btn-primary send-btn">➤</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== VIEW: BOARD ===== -->
+      <section id="view-board" class="view">
+        <div class="board-toolbar">
+          <h2>Tablero</h2>
+          <div class="board-filters">
+            <select id="filter-group">
+              <option value="all">Todos los grupos</option>
+            </select>
+            <select id="filter-status">
+              <option value="all">Todos los estados</option>
+              <option value="pendiente">Pendiente</option>
+              <option value="en_progreso">En progreso</option>
+              <option value="completada">Completada</option>
+            </select>
+          </div>
+          <input type="text" id="board-search" placeholder="🔍 Buscar..." class="search-input">
+        </div>
+        <div id="board-columns" class="board-columns"></div>
+      </section>
+
+      <!-- ===== VIEW: GROUPS ===== -->
+      <section id="view-groups" class="view">
+        <div class="groups-toolbar">
+          <h2>Grupos</h2>
+          <button id="btn-new-group" class="btn btn-primary">+ Nuevo grupo</button>
+        </div>
+        <div id="groups-list" class="groups-list"></div>
+      </section>
+
+      <!-- ===== VIEW: SETTINGS ===== -->
+      <section id="view-settings" class="view">
+        <h2>Ajustes</h2>
+        <div class="settings-item">
+          <label>Pat de GitHub</label>
+          <input type="password" id="set-github-token">
+        </div>
+        <div class="settings-item">
+          <label>Clave API de Gemini</label>
+          <input type="password" id="set-gemini-key">
+        </div>
+        <div class="settings-item">
+          <label>Repo de GitHub (owner/repo)</label>
+          <input type="text" id="set-github-repo">
+          <p class="hint">Debe ser un repo <b>privado</b>. Si aún no existe: <a href="https://github.com/new" target="_blank">crear repo aquí</a> (nombre p.ej. <code>mis-tareas</code>, visibilidad Private).</p>
+        </div>
+        <div class="settings-item">
+          <label>Tema</label>
+          <select id="set-theme">
+            <option value="dark">Oscuro</option>
+            <option value="light">Claro</option>
+          </select>
+        </div>
+        <div class="settings-item">
+          <label>Modelo Gemini</label>
+          <select id="set-model">
+            <option value="gemini-3.6-flash">Gemini 3.6 Flash (recomendado)</option>
+            <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (rápido)</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash (legacy)</option>
+          </select>
+        </div>
+        <button id="btn-save-settings" class="btn btn-primary">Guardar</button>
+        <div class="settings-item calendar">
+          <label>Google Calendar</label>
+          <p class="hint">Añade tareas aceptadas con fecha a tu calendario. Requiere configurar OAuth en Google Cloud (en desarrollo).</p>
+          <button id="btn-calendar" class="btn btn-outline" disabled>Proximamente</button>
+        </div>
+        <button id="btn-logout-2" class="btn btn-danger">Cerrar sesión</button>
+      </section>
+
+    </main>
+
+    <!-- FAB -->
+    <button id="btn-fab" class="fab" aria-label="Nueva tarea">＋</button>
+
+  </section>
+
+  <!-- Toast container -->
+  <div id="toasts" class="toasts"></div>
+
+  <!-- Modal container -->
+  <div id="modal-root"></div>
+
+</div>
+
+<script src="./app.js"></script>
+</body>
+</html>
