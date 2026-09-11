@@ -16,11 +16,18 @@ const LS = {
   user: 'gt_user',
   theme: 'gt_theme',
   model: 'gt_gemini_model',
+  username: 'gt_username',
+  ejPublic: 'gt_ej_public',
+  ejService: 'gt_ej_service',
+  ejTemplate: 'gt_ej_template',
 };
 
 const DEFAULT_MODEL = 'gemini-3.6-flash';
 
 const APP_REPO = 'juanjotellezhtml/mis-tareas-app';
+
+function currentUser() { return state.user ? state.user.username || state.user.login : ''; }
+function userName() { return state.user ? state.user.name || state.user.username || state.user.login : ''; }
 
 const TASK_STATUSES = ['propuesta', 'pendiente', 'accepted', 'en_progreso', 'completada', 'cancelada'];
 
@@ -87,6 +94,10 @@ function loadConfig() {
     gemini: localStorage.getItem(LS.gemini) || '',
     repo: localStorage.getItem(LS.repo) || '',
     model: localStorage.getItem(LS.model) || DEFAULT_MODEL,
+    username: localStorage.getItem(LS.username) || '',
+    ejPublic: localStorage.getItem(LS.ejPublic) || '',
+    ejService: localStorage.getItem(LS.ejService) || '',
+    ejTemplate: localStorage.getItem(LS.ejTemplate) || '',
   };
 }
 
@@ -95,6 +106,10 @@ function saveConfig(c) {
   localStorage.setItem(LS.gemini, c.gemini || '');
   localStorage.setItem(LS.repo, c.repo || '');
   localStorage.setItem(LS.model, c.model || DEFAULT_MODEL);
+  if (c.username) localStorage.setItem(LS.username, c.username);
+  localStorage.setItem(LS.ejPublic, c.ejPublic || '');
+  localStorage.setItem(LS.ejService, c.ejService || '');
+  localStorage.setItem(LS.ejTemplate, c.ejTemplate || '');
 }
 
 function applyTheme() {
@@ -122,9 +137,9 @@ async function login() {
   try {
     const user = await githubGetUser(token);
     const repoFull = normalizeRepo(repo, user.login);
-    state.config = { token, gemini, repo: repoFull, model: DEFAULT_MODEL };
+    state.config = { token, gemini, repo: repoFull, model: DEFAULT_MODEL, username: '' };
     saveConfig(state.config);
-    state.user = { login: user.login, name: user.name || user.login };
+    state.user = { login: user.login, username: '', name: user.name || user.login };
 
     // Load theme
     const theme = localStorage.getItem(LS.theme) || 'dark';
@@ -239,9 +254,9 @@ async function loginWithCreds() {
     const config = await decryptConfig(payload, password);
     if (!config.token || !config.gemini || !config.repo) throw new Error('Los datos de ese acceso no son válidos');
     const user = await githubGetUser(config.token);
-    state.config = { token: config.token, gemini: config.gemini, repo: config.repo, model: config.model || DEFAULT_MODEL };
+    state.config = { token: config.token, gemini: config.gemini, repo: config.repo, model: config.model || DEFAULT_MODEL, username: config.username || '' };
     saveConfig(state.config);
-    state.user = { login: user.login, name: user.name || user.login };
+    state.user = { login: user.login, username: state.config.username, name: user.name || user.login };
     const theme = localStorage.getItem(LS.theme) || 'dark';
     document.documentElement.setAttribute('data-theme', theme);
     await initApp();
@@ -267,7 +282,7 @@ async function saveAccessCredential() {
   c.token = $('#set-github-token').value || c.token;
   c.gemini = $('#set-gemini-key').value || c.gemini;
   c.repo = normalizeRepo($('#set-github-repo').value, state.user ? state.user.login : '') || c.repo;
-  const payload = await encryptConfig({ token: c.token, gemini: c.gemini, repo: c.repo, model: c.model || DEFAULT_MODEL }, password);
+  const payload = await encryptConfig({ token: c.token, gemini: c.gemini, repo: c.repo, model: c.model || DEFAULT_MODEL, username: username.toLowerCase().trim() }, password);
   const pathName = credsPath(username);
   try {
     let sha = null;
@@ -282,6 +297,138 @@ async function saveAccessCredential() {
   }
 }
 
+/* ============ INVITACIONES ============ */
+function generateInviteToken() {
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+function inviteLink(token) {
+  return window.location.origin + window.location.pathname + '#invite=' + token;
+}
+function getInviteFromUrl() {
+  const m = (window.location.hash || '').match(/invite=([a-f0-9]+)/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+async function sendInviteEmail(toEmail, alias, token, inviterName) {
+  const c = loadConfig();
+  if (!c.ejPublic || !c.ejService || !c.ejTemplate) return false;
+  try {
+    const res = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        service_id: c.ejService,
+        template_id: c.ejTemplate,
+        user_id: c.ejPublic,
+        template_params: {
+          to_email: toEmail,
+          alias: alias,
+          inviter: inviterName || currentUser(),
+          invite_link: inviteLink(token),
+        },
+      }),
+    });
+    return res.ok;
+  } catch (e) { return false; }
+}
+
+async function createInviteForVirtual(alias, email, groupId, vid) {
+  const token = generateInviteToken();
+  const c = loadConfig();
+  const cfg = { token: c.token, gemini: c.gemini, repo: c.repo, model: c.model || DEFAULT_MODEL, username: c.username || '' };
+  const payload = await encryptConfig(cfg, token);
+  const path = 'invites/' + token + '.json';
+  const fileContent = { v: 1, alias, email: email || '', created_by: currentUser(), created_at: now(), group_id: groupId, vid, config: payload };
+  let sha = null;
+  try { const ex = await api('/repos/' + APP_REPO + '/contents/' + path); sha = ex.sha; }
+  catch (e2) { if (e2.status !== 404) throw e2; }
+  const body = { message: 'Invitación para ' + alias, content: bufToB64(new TextEncoder().encode(JSON.stringify(fileContent))) };
+  if (sha) body.sha = sha;
+  await api('/repos/' + APP_REPO + '/contents/' + path, { method: 'PUT', body: JSON.stringify(body) });
+  return token;
+}
+
+async function completeRegistration(token, username, password) {
+  const res = await fetch('https://raw.githubusercontent.com/' + APP_REPO + '/main/invites/' + token + '.json');
+  if (!res.ok) throw new Error('La invitación no es válida o ya ha sido usada.');
+  const invite = await res.json();
+  const config = await decryptConfig(invite.config, token);
+  if (!config.token || !config.gemini || !config.repo) throw new Error('La invitación no es válida.');
+
+  const takenRes = await fetch('https://raw.githubusercontent.com/' + APP_REPO + '/main/' + credsPath(username));
+  if (takenRes.ok) throw new Error('Ese usuario ya existe. Elige otro.');
+
+  const payload = await encryptConfig({ token: config.token, gemini: config.gemini, repo: config.repo, model: config.model || DEFAULT_MODEL, username }, password);
+  const headers = {
+    Authorization: 'Bearer ' + config.token,
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'Content-Type': 'application/json',
+  };
+  const putRes = await fetch('https://api.github.com/repos/' + APP_REPO + '/contents/' + credsPath(username), {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({ message: 'Registro de ' + username, content: bufToB64(new TextEncoder().encode(JSON.stringify(payload))) }),
+  });
+  if (!putRes.ok) throw new Error('No se pudo guardar tu acceso (' + putRes.status + ').');
+
+  try {
+    const invRes = await fetch('https://api.github.com/repos/' + APP_REPO + '/contents/invites/' + token + '.json', { headers });
+    if (invRes.ok) {
+      const j = await invRes.json();
+      await fetch('https://api.github.com/repos/' + APP_REPO + '/contents/invites/' + token + '.json', {
+        method: 'DELETE',
+        headers,
+        body: JSON.stringify({ message: 'Registro completado', sha: j.sha }),
+      });
+    }
+  } catch (e) {}
+  return { config, invite };
+}
+
+async function registerWithInvite(token) {
+  const regUser = $('#reg-user').value.trim().toLowerCase();
+  const p1 = $('#reg-pass').value;
+  const p2 = $('#reg-pass2').value;
+  const err = $('#reg-error');
+  err.textContent = '';
+  if (!/^[a-z0-9._-]{2,30}$/.test(regUser)) { err.textContent = 'Usuario: solo minúsculas, números, puntos o guiones (2-30 caracteres).'; return; }
+  if (p1.length < 6) { err.textContent = 'La contraseña debe tener al menos 6 caracteres.'; return; }
+  if (p1 !== p2) { err.textContent = 'Las contraseñas no coinciden.'; return; }
+  try {
+    const { config, invite } = await completeRegistration(token, regUser, p1);
+    const user = await githubGetUser(config.token);
+    state.config = { token: config.token, gemini: config.gemini, repo: config.repo, model: config.model || DEFAULT_MODEL, username: regUser };
+    saveConfig(state.config);
+    state.user = { login: user.login, username: regUser, name: user.name || user.login };
+    if (window.history && window.history.replaceState) window.history.replaceState(null, '', window.location.pathname);
+    loadLocal();
+    renderHeader();
+    applyTheme();
+    showScreen('screen-app');
+    await syncFromGitHub();
+    if (invite && invite.group_id) { try { await linkRegisteredToGroup(invite.group_id, invite.vid, regUser); } catch (e) {} }
+    navigate('inbox');
+    toast('¡Bienvenido, ' + regUser + '! Ya puedes añadir tareas.');
+  } catch (e) {
+    err.textContent = e.message;
+  }
+}
+
+async function linkRegisteredToGroup(groupId, vid, username) {
+  const groups = getMyGroups();
+  const g = groups[groupId];
+  if (!g) return;
+  if (!g.members) g.members = {};
+  g.members[username] = { role: 'member', joined_at: now() };
+  if (vid && g.virtual_members && g.virtual_members[vid]) {
+    g.virtual_members[vid].username = username;
+    g.virtual_members[vid].registered_at = now();
+  }
+  await gitPush('Usuario ' + username + ' se unió al grupo ' + g.name);
+}
+
 /* ============ DATA LAYER ============ */
 function normalizeRepo(repo, login) {
   repo = (repo || '').trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
@@ -292,7 +439,29 @@ function normalizeRepo(repo, login) {
 }
 
 function defaultData() {
-  return { shared: { tasks: {}, inbox: {}, outbox: {}, analysis: {} }, users: {} };
+  return { shared: { tasks: {}, inbox: {}, outbox: {}, analysis: {}, groups: {}, invites: {} }, users: {} };
+}
+
+function migrateLocalGroupsToShared() {
+  try {
+    const local = state.local;
+    const groups = ensureGroupsSlot();
+    if (local && local.groups && Object.keys(local.groups).length && Object.keys(groups).length === 0) {
+      const owner = currentUser() || 'admin';
+      Object.keys(local.groups).forEach((gid) => {
+        const g = local.groups[gid];
+        groups[gid] = {
+          id: gid,
+          name: g.name,
+          description: g.description || '',
+          owner,
+          members: { [owner]: { role: 'owner', joined_at: now() } },
+          virtual_members: g.virtual_members || {},
+        };
+      });
+      gitPush('Migrar grupos locales').then(() => { if (state.user) renderAll(); });
+    }
+  } catch (e) {}
 }
 
 function ensureLocal() {
@@ -301,32 +470,40 @@ function ensureLocal() {
 }
 
 function ensureUserSlot(d) {
-  const u = state.user.login;
+  const u = currentUser();
   if (!d.users[u]) d.users[u] = { groups: {}, prefs: {} };
   return d.users[u];
 }
 
 function getMyGroups() {
-  const slot = ensureLocal();
-  if (!slot.groups || typeof slot.groups !== 'object') slot.groups = {};
-  return slot.groups;
+  if (!state.data) return {};
+  if (!state.data.shared.groups || typeof state.data.shared.groups !== 'object') {
+    state.data.shared.groups = state.data.shared.groups || {};
+  }
+  return state.data.shared.groups;
+}
+
+function ensureGroupsSlot() {
+  if (!state.data) return {};
+  if (!state.data.shared.groups) state.data.shared.groups = {};
+  return state.data.shared.groups;
 }
 
 function getMyInbox() {
   if (!state.data) return [];
-  const u = state.user.login;
+  const u = currentUser();
   return state.data.shared.inbox[u] || [];
 }
 
 function getMyOutbox() {
   if (!state.data) return [];
-  const u = state.user.login;
+  const u = currentUser();
   return state.data.shared.outbox[u] || [];
 }
 
 function getMyAnalysis() {
   if (!state.data) return [];
-  const u = state.user.login;
+  const u = currentUser();
   return state.data.shared.analysis[u] || [];
 }
 
@@ -407,6 +584,7 @@ async function syncFromGitHub() {
       await writeFile(state.data, 'Init');
       setSyncDot('');
     }
+    migrateLocalGroupsToShared();
     renderAll();
     showSyncStatus('ok');
     return true;
@@ -476,9 +654,9 @@ function renderAll() {
 
 function renderHeader() {
   if (state.user) {
-    $('#user-name').textContent = state.user.name || state.user.login;
-    $('#user-login').textContent = '@' + state.user.login;
-    $('#avatar').textContent = (state.user.login || '?')[0];
+    $('#user-name').textContent = userName();
+    $('#user-login').textContent = '@' + currentUser();
+    $('#avatar').textContent = (currentUser() || '?')[0];
     $('#user-repo').textContent = state.config && state.config.repo ? '📁 ' + state.config.repo : '';
   }
 }
@@ -603,7 +781,7 @@ function statusChip(s) {
 async function acceptTask(item, task) {
   // Aceptar propuesta desde bandeja de entrada
   // Actualizar participantes
-  const u = state.user.login;
+  const u = currentUser();
   const part = task.participants || {};
   if (!part[u]) part[u] = {};
   part[u].status = 'accepted';
@@ -633,7 +811,7 @@ async function acceptTask(item, task) {
 }
 
 async function rejectTask(item, task) {
-  const u = state.user.login;
+  const u = currentUser();
   const part = task.participants || {};
   if (part[u]) { part[u].status = 'rechazada'; part[u].responded_at = now(); }
   task.participants = part;
@@ -887,7 +1065,7 @@ function confirmProposalsModal(tasks) {
 }
 
 async function createTasksFromProposals(tasks) {
-  const u = state.user.login;
+  const u = currentUser();
   for (const t of tasks) {
     const id = uuid();
     const task = {
@@ -1038,12 +1216,18 @@ function renderBoard() {
   fg.innerHTML = '<option value="all">Todos los grupos</option>' + myGroupIds.map((g) => `<option value="${esc(g)}">${esc(myGroups[g].name)}</option>`).join('') + '<option value="none">Sin grupo</option>';
   fg.value = myGroupIds.includes(current) ? current : 'all';
 
-  // Show tasks I created or I'm a participant of
-  const u = state.user.login;
+  // Show tasks I created or I'm a participant / group member of
+  const u = currentUser();
+  const isGroupMember = (gid) => {
+    const g = getMyGroups()[gid];
+    if (!g) return false;
+    return !!g.members && !!g.members[u];
+  };
 
   const mine = myTasks.filter((t) => {
     if (t.created_by === u || (t.assigned_to === u)) return true;
     if (t.participants && t.participants[u]) return true;
+    if (t.group_id && isGroupMember(t.group_id)) return true;
     return false;
   });
 
@@ -1100,15 +1284,14 @@ function advanceBtn(t) {
   return out;
 }
 
-function participantName(login) {
-  if (!login) return '';
-  // If it's a virtual member, show its name
-  const myGroups = getMyGroups();
-  for (const g of Object.keys(myGroups)) {
-    const vm = myGroups[g].virtual_members || {};
-    if (vm[login]) return vm[login].display_name + ' (virtual)';
+function participantName(key) {
+  if (!key) return '';
+  const groups = getMyGroups();
+  for (const g of Object.keys(groups)) {
+    const vm = groups[g].virtual_members || {};
+    if (vm[key]) return vm[key].display_name + (vm[key].username ? '' : ' (virtual)');
   }
-  return login;
+  return key;
 }
 
 async function advanceStatus(id) {
@@ -1133,6 +1316,24 @@ async function deleteTask(id) {
   if (!confirm('¿Borrar esta tarea?')) return;
   delete state.data.shared.tasks[id];
   if (await gitPush('Borrar tarea ' + id)) { renderAll(); }
+}
+
+function buildAssigneeOptions(groups) {
+  const opts = [];
+  const seen = {};
+  const add = (value, label) => { if (!value || seen[value]) return; seen[value] = 1; opts.push({ value, label }); };
+  const u = currentUser();
+  add(u, u);
+  Object.keys(groups).forEach((gid) => {
+    const g = groups[gid];
+    if (g.owner) add(g.owner, g.owner);
+    Object.keys(g.members || {}).forEach((m) => add(m, m));
+    Object.keys(g.virtual_members || {}).forEach((vid) => {
+      const vm = g.virtual_members[vid];
+      add(vid, vm.display_name + (vm.username ? ' (' + vm.username + ')' : ' (virtual)'));
+    });
+  });
+  return opts;
 }
 
 function editTaskModal(id) {
@@ -1166,6 +1367,12 @@ function editTaskModal(id) {
         ${Object.keys(myGroups).map((g) => `<option value="${esc(g)}" ${t.group_id === g ? 'selected' : ''}>${esc(myGroups[g].name)}</option>`).join('')}
       </select>
     </div>
+    <div class="field"><label>Responsable (asignado a)</label>
+      <select id="e-assignee">
+        <option value="">Sin asignar</option>
+        ${buildAssigneeOptions(myGroups).map((o) => `<option value="${esc(o.value)}" ${t.assigned_to === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+      </select>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-outline" id="e-cancel">Cancelar</button>
       <button class="btn btn-primary" id="e-save">Guardar</button>
@@ -1179,6 +1386,7 @@ function editTaskModal(id) {
     t.priority = modal.querySelector('#e-priority').value;
     t.status = modal.querySelector('#e-status').value;
     t.group_id = modal.querySelector('#e-group').value || null;
+    t.assigned_to = modal.querySelector('#e-assignee').value || null;
     t.updated_at = now();
     root.innerHTML = '';
     if (await gitPush('Editar tarea ' + id)) { renderAll(); }
@@ -1208,13 +1416,24 @@ function renderGroups() {
         <button class="btn btn-sm btn-outline btn-danger" data-a="delg" data-id="${esc(gid)}">Eliminar</button>
       </div>`;
     const memRow = card.querySelector('.group-members');
+    const members = g.members || {};
+    const memberKeys = Object.keys(members).filter((m) => m !== g.owner);
     const virtuals = g.virtual_members || {};
+    if (g.owner) {
+      const ownerChip = el('span', 'member-chip', '👑 ' + esc(g.owner));
+      memRow.appendChild(ownerChip);
+    }
+    memberKeys.forEach((m) => {
+      memRow.appendChild(el('span', 'member-chip', esc(m)));
+    });
     Object.keys(virtuals).forEach((vid) => {
-      const chip = el('span', 'member-chip virtual', esc(virtuals[vid].display_name) + ' <span class="remove" data-g="' + esc(gid) + '" data-v="' + esc(vid) + '">✕</span>');
+      const label = esc(virtuals[vid].display_name) + (virtuals[vid].username ? '' : ' <span class="tag-virtual">virtual</span>') +
+        ' <span class="remove" data-g="' + esc(gid) + '" data-v="' + esc(vid) + '">✕</span>';
+      const chip = el('span', 'member-chip' + (virtuals[vid].username ? '' : ' virtual'), label);
       chip.querySelector('.remove').onclick = () => removeVirtual(gid, vid);
       memRow.appendChild(chip);
     });
-    if (Object.keys(virtuals).length === 0) memRow.appendChild(el('span', 'hint', 'Sin miembros virtuales'));
+    if (memberKeys.length === 0 && Object.keys(virtuals).length === 0 && !g.owner) memRow.appendChild(el('span', 'hint', 'Sin miembros'));
     card.querySelector('[data-a="vm"]').onclick = () => addVirtualModal(gid);
     card.querySelector('[data-a="delg"]').onclick = () => deleteGroup(gid);
     list.appendChild(card);
@@ -1228,39 +1447,78 @@ function addVirtualModal(gid) {
   const modal = el('div', 'modal');
   modal.innerHTML = `<h3>Añadir miembro virtual</h3>
     <div class="field"><label>Nombre</label><input id="vm-name" placeholder="Ej: Fontanero, Cerrajero, Proveedor..."></div>
-    <div class="modal-actions"><button class="btn btn-outline" id="vm-cancel">Cancelar</button><button class="btn btn-primary" id="vm-save">Añadir</button></div>`;
+    <div class="field"><label>Email (opcional)</label><input id="vm-email" placeholder="nombre@correo.com">
+      <p class="hint">Si lo pones, el botón "Guardar e invitar" enviará un email con el enlace para que cree su usuario y contraseña.</p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="vm-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="vm-save">Guardar</button>
+      <button class="btn btn-primary" id="vm-invite">Guardar e invitar</button>
+    </div>
+    <div id="vm-status" class="hint"></div>`;
   const rootCleanup = () => root.innerHTML = '';
-  modal.querySelector('#vm-cancel').onclick = rootCleanup;
-  modal.querySelector('#vm-save').onclick = async () => {
+  const vmEmail = () => modal.querySelector('#vm-email').value.trim();
+
+  const createVirtual = async () => {
     const name = modal.querySelector('#vm-name').value.trim();
-    if (!name) return;
+    if (!name) return null;
     const groups = getMyGroups();
     const g = groups[gid];
+    if (!g) return null;
     if (!g.virtual_members) g.virtual_members = {};
     const vid = 'vrt-' + uuid().slice(0, 8);
-    g.virtual_members[vid] = { id: vid, display_name: name };
-    saveLocal();
-    rootCleanup();
-    renderGroups();
-    toast('Miembro virtual añadido');
+    g.virtual_members[vid] = { id: vid, display_name: name, email: vmEmail() || '', created_by: currentUser() };
+    if (!await gitPush('Añadir virtual ' + name + ' a ' + g.name)) return null;
+    return { vid, name };
+  };
+
+  modal.querySelector('#vm-cancel').onclick = rootCleanup;
+  modal.querySelector('#vm-save').onclick = async () => {
+    const r = await createVirtual();
+    if (r) { rootCleanup(); renderGroups(); toast('Miembro virtual añadido'); }
+  };
+  modal.querySelector('#vm-invite').onclick = async () => {
+    const name = modal.querySelector('#vm-name').value.trim();
+    const email = vmEmail();
+    const status = modal.querySelector('#vm-status');
+    status.textContent = '';
+    if (!name) { status.textContent = 'Escribe el nombre del miembro.'; return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { status.textContent = 'Escribe un email válido (requerido para invitar).'; return; }
+    const r = await createVirtual();
+    if (!r) return;
+    status.textContent = 'Creando invitación...';
+    try {
+      const token = await createInviteForVirtual(name, email, gid, r.vid);
+      const sent = await sendInviteEmail(email, name, token, currentUser());
+      const link = inviteLink(token);
+      status.textContent = sent
+        ? '✅ Invitación enviada a ' + email
+        : 'No se pudo enviar el email (configura EmailJS en Ajustes). Copia y envía este enlace:\n' + link;
+      const copyBtn = el('button', 'btn btn-sm btn-outline', '📋 Copiar enlace');
+      copyBtn.onclick = () => { navigator.clipboard.writeText(link).then(() => toast('Enlace copiado')).catch(() => toast(link, 'error')); };
+      status.appendChild(document.createElement('br'));
+      status.appendChild(copyBtn);
+      setTimeout(() => { if (root) root.innerHTML = ''; }, 9000);
+    } catch (e) {
+      status.textContent = 'Error al crear la invitación: ' + e.message;
+    }
   };
   backdrop.appendChild(modal);
   root.appendChild(backdrop);
 }
 
-function removeVirtual(gid, vid) {
+async function removeVirtual(gid, vid) {
   const groups = getMyGroups();
   delete groups[gid].virtual_members[vid];
-  saveLocal();
-  renderGroups();
+  if (await gitPush('Quitar virtual de ' + groups[gid].name)) { renderGroups(); }
 }
 
-function deleteGroup(gid) {
+async function deleteGroup(gid) {
   if (!confirm('¿Eliminar este grupo? Las tareas se mantienen pero quedan sin grupo.')) return;
   const groups = getMyGroups();
+  if (!groups[gid]) return;
   delete groups[gid];
-  saveLocal();
-  renderGroups();
+  if (await gitPush('Eliminar grupo')) { renderGroups(); }
 }
 
 function newGroupModal() {
@@ -1274,16 +1532,17 @@ function newGroupModal() {
     <div class="modal-actions"><button class="btn btn-outline" id="g-cancel">Cancelar</button><button class="btn btn-primary" id="g-save">Crear</button></div>`;
   const cleanup = () => root.innerHTML = '';
   modal.querySelector('#g-cancel').onclick = cleanup;
-  modal.querySelector('#g-save').onclick = () => {
+  modal.querySelector('#g-save').onclick = async () => {
     const name = modal.querySelector('#g-name').value.trim();
     if (!name) return;
-    const groups = getMyGroups();
+    const groups = ensureGroupsSlot();
     const gid = 'grp-' + uuid().slice(0, 8);
-    groups[gid] = { id: gid, name, description: modal.querySelector('#g-desc').value.trim(), virtual_members: {} };
-    saveLocal();
-    cleanup();
-    renderGroups();
-    toast('Grupo creado');
+    groups[gid] = { id: gid, name, description: modal.querySelector('#g-desc').value.trim(), owner: currentUser(), members: {}, virtual_members: {} };
+    if (await gitPush('Crear grupo ' + name)) {
+      cleanup();
+      renderGroups();
+      toast('Grupo creado');
+    }
   };
   backdrop.appendChild(modal);
   root.appendChild(backdrop);
@@ -1325,6 +1584,9 @@ function wireEvents() {
     c.gemini = $('#set-gemini-key').value || c.gemini;
     c.repo = normalizeRepo($('#set-github-repo').value, state.user ? state.user.login : '') || c.repo;
     c.model = $('#set-model').value;
+    c.ejPublic = $('#set-ej-public').value.trim();
+    c.ejService = $('#set-ej-service').value.trim();
+    c.ejTemplate = $('#set-ej-template').value.trim();
     saveConfig(c);
     state.config = c;
     const t = $('#set-theme').value;
@@ -1332,6 +1594,11 @@ function wireEvents() {
     document.documentElement.setAttribute('data-theme', t);
     toast('Ajustes guardados');
   };
+
+  // Registration via invite
+  $('#btn-register').onclick = () => { if (pendingInvite) registerWithInvite(pendingInvite); };
+  $('#reg-pass2').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (pendingInvite) registerWithInvite(pendingInvite); } });
+  $('#btn-back-login').onclick = () => { if (window.history && window.history.replaceState) window.history.replaceState(null, '', window.location.pathname); showScreen('screen-login'); };
 
   // Chat send
   $('#btn-chat-send').onclick = sendChatMessage;
@@ -1386,18 +1653,28 @@ function fillSettingsFromConfig() {
   const model = c.model || DEFAULT_MODEL;
   $('#set-model').value = model;
   $('#set-theme').value = document.documentElement.getAttribute('data-theme') || 'dark';
+  $('#set-ej-public').value = c.ejPublic || '';
+  $('#set-ej-service').value = c.ejService || '';
+  $('#set-ej-template').value = c.ejTemplate || '';
 }
+
+let pendingInvite = null;
 
 /* ============ BOOTSTRAP ============ */
 function boot() {
   applyTheme();
   initPasswordToggles();
   const c = loadConfig();
+  pendingInvite = getInviteFromUrl();
+  if (pendingInvite) {
+    showScreen('screen-register');
+    return;
+  }
   if (c.token && c.gemini && c.repo) {
     // Attempt auto-login
     state.config = c;
     githubGetUser(c.token).then((user) => {
-      state.user = { login: user.login, name: user.name || user.login };
+      state.user = { login: user.login, username: c.username || '', name: user.name || user.login };
       loadLocal();
       renderHeader();
       showScreen('screen-app');
