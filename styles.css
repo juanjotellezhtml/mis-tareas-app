@@ -45,6 +45,19 @@ body { overflow: hidden; }
 button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
 input, select, textarea { font-family: inherit; color: var(--text); background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 12px; width: 100%; font-size: 15px; outline: none; }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+
+.pwd-wrap { position: relative; }
+.pwd-wrap input { padding-right: 44px; }
+.pwd-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 17px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  color: var(--text);
+}
 textarea { resize: none; }
 a { color: var(--accent-2); }
 
