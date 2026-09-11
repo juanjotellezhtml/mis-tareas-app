@@ -167,12 +167,39 @@ a { color: var(--accent-2); }
 .board-col-title { display: flex; align-items: center; justify-content: space-between; font-weight: 700; margin-bottom: 10px; }
 .board-col-title .count { color: var(--text-dim); font-size: 12px; background: var(--bg3); padding: 2px 8px; border-radius: 8px; }
 .task-card { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 8px; }
+.task-card.loose { cursor: grab; touch-action: pan-y; }
+.task-card.loose:active { cursor: grabbing; }
 .task-card .title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
 .task-card .meta { font-size: 12px; color: var(--text-dim); }
 .task-card .actions { display: flex; gap: 6px; margin-top: 8px; }
 .task-card .actions button { font-size: 12px; }
 .task-card.overdue { border-left: 4px solid var(--red); }
 .task-card .assigned { font-size: 12px; margin-top: 4px; color: var(--text-dim); }
+.task-card.drag-source { opacity: 0.35; }
+
+/* ===== CARPETAS DE TAREAS ===== */
+.board-col-inner { display: flex; flex-direction: column; gap: 8px; }
+.task-group-card { background: var(--bg2); border: 1px dashed var(--accent-2); border-radius: 12px; margin-bottom: 8px; overflow: hidden; }
+.task-group-card .task-group-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; user-select: none; }
+.task-group-card .task-group-head.open { border-bottom: 1px solid var(--border); }
+.tgc-icon { font-size: 16px; }
+.tgc-name { font-weight: 700; font-size: 14px; flex: 1; word-break: break-word; }
+.tgc-count { font-size: 12px; font-weight: 700; background: var(--accent-2); color: #fff; padding: 2px 8px; border-radius: 10px; }
+.tgc-chev { font-size: 12px; color: var(--text-dim); }
+.tgc-actions { display: flex; gap: 4px; }
+.task-group-body { padding: 4px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+.task-group-row { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; display: flex; align-items: center; gap: 8px; }
+.tgr-info { flex: 1; min-width: 0; }
+.tgr-title { font-size: 13px; font-weight: 600; word-break: break-word; }
+.task-group-row .meta { font-size: 11px; }
+.task-group-row .assigned { font-size: 11px; margin-top: 2px; }
+.tgr-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+/* ===== DRAG & DROP ===== */
+body.dragging { overflow: hidden; }
+body.dragging .task-card.loose { touch-action: none; }
+.drag-ghost { position: fixed; z-index: 9999; pointer-events: none; background: var(--accent); color: #fff; padding: 8px 12px; border-radius: 10px; font-size: 13px; font-weight: 600; box-shadow: 0 6px 18px rgba(0,0,0,.35); max-width: 60vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-card.drop-target, .task-group-card.drop-target { outline: 3px solid var(--accent); outline-offset: -1px; }
 .status-chip { font-size: 11px; padding: 2px 8px; border-radius: 8px; font-weight: 600; }
 .status-pendiente { background: var(--yellow); color: #000; }
 .status-propuesta { background: var(--blue); color: #fff; }
