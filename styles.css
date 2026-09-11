@@ -189,6 +189,7 @@ a { color: var(--accent-2); }
 .member-chip { background: var(--bg3); padding: 4px 10px; border-radius: 10px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
 .member-chip.virtual { border: 1px dashed var(--accent-2); }
 .member-chip .remove { cursor: pointer; color: var(--red); }
+.tag-virtual { font-size: 10px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.5px; }
 .group-actions { display: flex; gap: 8px; }
 
 /* ===== SETTINGS ===== */
