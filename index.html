@@ -61,6 +61,31 @@
     </div>
   </section>
 
+  <!-- ============ SCREEN: REGISTER (via invite link) ============ -->
+  <section id="screen-register" class="screen hidden">
+    <div class="login-box">
+      <div class="logo">T</div>
+      <h1>Te han invitado</h1>
+      <p class="tagline">Crea tu propio usuario y contraseña para empezar</p>
+      <div class="field">
+        <label>Usuario</label>
+        <input type="text" id="reg-user" placeholder="p. ej. ana" autocomplete="username">
+        <p class="hint">Mínúsculas, números, puntos o guiones (2-30 caracteres).</p>
+      </div>
+      <div class="field">
+        <label>Contraseña</label>
+        <input type="password" id="reg-pass" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+      </div>
+      <div class="field">
+        <label>Repite la contraseña</label>
+        <input type="password" id="reg-pass2" placeholder="••••••••" autocomplete="new-password">
+      </div>
+      <button id="btn-register" class="btn btn-primary btn-block">Crear mi acceso</button>
+      <div id="reg-error" class="error"></div>
+      <button id="btn-back-login" class="btn btn-outline btn-block" type="button">« Volver al inicio de sesión</button>
+    </div>
+  </section>
+
   <!-- ============ SCREEN: APP (logged in) ============ -->
   <section id="screen-app" class="screen hidden">
 
@@ -205,6 +230,13 @@
           <input type="password" id="set-creds-confirm" placeholder="Repite la contraseña" autocomplete="new-password">
           <button id="btn-set-creds" class="btn btn-primary" style="margin-top:6px">Crear / actualizar clave de acceso</button>
           <div id="set-creds-status" class="hint"></div>
+        </div>
+        <div class="settings-item">
+          <label>Email de invitaciones (EmailJS)</label>
+          <p class="hint"><b>Opcional.</b> Para que "Guardar e invitar" envíe el email real. Crea una cuenta gratis en emailjs.com, conecta tu correo y crea una plantilla con las variables <code>to_email</code>, <code>alias</code>, <code>inviter</code> e <code>invite_link</code>. Pega aquí los tres datos:</p>
+          <input type="text" id="set-ej-public" placeholder="Public Key (CLAVE PUBLICA tipo XXX)" autocomplete="off">
+          <input type="text" id="set-ej-service" placeholder="Service ID (tipo service_xxx)" autocomplete="off">
+          <input type="text" id="set-ej-template" placeholder="Template ID (tipo template_xxx)" autocomplete="off">
         </div>
         <div class="settings-item calendar">
           <label>Google Calendar</label>
