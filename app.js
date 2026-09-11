@@ -20,6 +20,8 @@ const LS = {
 
 const DEFAULT_MODEL = 'gemini-3.6-flash';
 
+const APP_REPO = 'juanjotellezhtml/mis-tareas-app';
+
 const TASK_STATUSES = ['propuesta', 'pendiente', 'accepted', 'en_progreso', 'completada', 'cancelada'];
 
 let state = {
@@ -146,6 +148,138 @@ function logout() {
   state = { ...state, user: null, config: null, data: null, local: null };
   $('#screen-app').classList.add('hidden');
   $('#screen-login').classList.remove('hidden');
+}
+
+/* ============ ACCESO POR USUARIO Y CONTRASEÑA ============ */
+function bufToB64(buf) {
+  const bytes = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function b64ToBuf(b64) {
+  const s = atob(b64);
+  const bytes = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+  return bytes;
+}
+async function deriveKey(password, salt) {
+  const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 150000, hash: 'SHA-256' },
+    material,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+async function encryptConfig(config, password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(password, salt);
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(config)));
+  return { v: 1, salt: bufToB64(salt), iv: bufToB64(iv), data: bufToB64(cipher) };
+}
+async function decryptConfig(payload, password) {
+  try {
+    const key = await deriveKey(password, b64ToBuf(payload.salt));
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBuf(payload.iv) }, key, b64ToBuf(payload.data));
+    return JSON.parse(new TextDecoder().decode(plain));
+  } catch (e) {
+    throw new Error('Contraseña incorrecta');
+  }
+}
+function credsPath(username) {
+  return 'creds/' + encodeURIComponent(username.toLowerCase().trim()) + '.json';
+}
+function credsRawUrl(username) {
+  return 'https://raw.githubusercontent.com/' + APP_REPO + '/main/' + credsPath(username);
+}
+
+function initPasswordToggles() {
+  document.querySelectorAll('input[type="password"]').forEach((input) => {
+    if (input.dataset.pwdReady) return;
+    input.dataset.pwdReady = '1';
+    const wrap = el('div', 'pwd-wrap');
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    const btn = el('button', 'pwd-toggle', '👁');
+    btn.type = 'button';
+    btn.setAttribute('aria-label', 'Mostrar u ocultar contraseña');
+    btn.onclick = () => {
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      btn.textContent = show ? '🙈' : '👁';
+    };
+    wrap.appendChild(btn);
+  });
+}
+
+function toggleLoginMode(showCreds) {
+  const on = !!showCreds;
+  $('#div-creds-login').classList.toggle('hidden', !on);
+  $('#div-technical-login').classList.toggle('hidden', on);
+  const tg = $('#btn-toggle-login');
+  tg.textContent = on ? 'Usar PAT y claves directamente' : '🔑 Entrar con usuario y contraseña';
+  tg.classList.toggle('btn-primary', on);
+  tg.classList.toggle('btn-outline', !on);
+  if (on) $('#creds-user').focus();
+}
+
+async function loginWithCreds() {
+  const username = $('#creds-user').value.trim();
+  const password = $('#creds-pass').value;
+  const err = $('#creds-error');
+  err.textContent = '';
+  if (!username || !password) { err.textContent = 'Introduce tu usuario y contraseña'; return; }
+  try {
+    const res = await fetch(credsRawUrl(username));
+    if (!res.ok) throw new Error('No existe el acceso "' + username + '". Créalo primero en Ajustes de la app.');
+    const payload = await res.json();
+    const config = await decryptConfig(payload, password);
+    if (!config.token || !config.gemini || !config.repo) throw new Error('Los datos de ese acceso no son válidos');
+    const user = await githubGetUser(config.token);
+    state.config = { token: config.token, gemini: config.gemini, repo: config.repo, model: config.model || DEFAULT_MODEL };
+    saveConfig(state.config);
+    state.user = { login: user.login, name: user.name || user.login };
+    const theme = localStorage.getItem(LS.theme) || 'dark';
+    document.documentElement.setAttribute('data-theme', theme);
+    await initApp();
+    showScreen('screen-app');
+    await syncFromGitHub();
+    navigate('inbox');
+    toast('Bienvenido, ' + (user.name || user.login));
+  } catch (e) {
+    err.textContent = e.message;
+  }
+}
+
+async function saveAccessCredential() {
+  const username = $('#set-creds-user').value.trim();
+  const password = $('#set-creds-pass').value;
+  const confirm = $('#set-creds-confirm').value;
+  const out = $('#set-creds-status');
+  out.textContent = '';
+  if (!username || !password || !confirm) { out.textContent = 'Completa usuario y contraseña.'; return; }
+  if (password !== confirm) { out.textContent = 'Las contraseñas no coinciden.'; return; }
+  if (password.length < 6) { out.textContent = 'La contraseña debe tener al menos 6 caracteres.'; return; }
+  const c = loadConfig();
+  c.token = $('#set-github-token').value || c.token;
+  c.gemini = $('#set-gemini-key').value || c.gemini;
+  c.repo = normalizeRepo($('#set-github-repo').value, state.user ? state.user.login : '') || c.repo;
+  const payload = await encryptConfig({ token: c.token, gemini: c.gemini, repo: c.repo, model: c.model || DEFAULT_MODEL }, password);
+  const pathName = credsPath(username);
+  try {
+    let sha = null;
+    try { const existing = await api('/repos/' + APP_REPO + '/contents/' + pathName); sha = existing.sha; }
+    catch (e2) { if (e2.status !== 404) throw e2; }
+    const body = { message: 'Guardar acceso ' + username, content: bufToB64(new TextEncoder().encode(JSON.stringify(payload))) };
+    if (sha) body.sha = sha;
+    await api('/repos/' + APP_REPO + '/contents/' + pathName, { method: 'PUT', body: JSON.stringify(body) });
+    out.textContent = 'Acceso guardado como "' + username.toLowerCase().trim() + '". Ya puedes entrar desde cualquier dispositivo solo con tu usuario y contraseña.';
+  } catch (e) {
+    out.textContent = 'Error: ' + e.message;
+  }
 }
 
 /* ============ DATA LAYER ============ */
@@ -1168,6 +1302,11 @@ function tryAddToCalendar(task) {
 /* ============ EVENT WIRING ============ */
 function wireEvents() {
   $('#btn-login').onclick = login;
+  $('#btn-toggle-login').onclick = () => toggleLoginMode($('#div-creds-login').classList.contains('hidden'));
+  $('#btn-back-technical').onclick = () => toggleLoginMode(false);
+  $('#btn-creds-login').onclick = loginWithCreds;
+  $('#creds-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') loginWithCreds(); });
+  $('#btn-set-creds').onclick = saveAccessCredential;
 
   // Sidebar
   $('#btn-menu').onclick = openSidebar;
@@ -1252,6 +1391,7 @@ function fillSettingsFromConfig() {
 /* ============ BOOTSTRAP ============ */
 function boot() {
   applyTheme();
+  initPasswordToggles();
   const c = loadConfig();
   if (c.token && c.gemini && c.repo) {
     // Attempt auto-login
