@@ -439,7 +439,7 @@ function normalizeRepo(repo, login) {
 }
 
 function defaultData() {
-  return { shared: { tasks: {}, inbox: {}, outbox: {}, analysis: {}, groups: {}, invites: {} }, users: {} };
+  return { shared: { tasks: {}, inbox: {}, outbox: {}, analysis: {}, groups: {}, invites: {}, taskGroups: {} }, users: {} };
 }
 
 function migrateLocalGroupsToShared() {
@@ -1198,6 +1198,18 @@ function reviewAnalysis(id) {
 }
 
 /* ============ BOARD ============ */
+function taskGroupsIndex() {
+  const idx = {};
+  Object.values(getTaskGroups()).forEach((g) => (g.task_ids || []).forEach((id) => { if (g.status) idx[id] = g.id; }));
+  return idx;
+}
+
+function getTaskGroups() {
+  if (!state.data) return {};
+  if (!state.data.shared.taskGroups) state.data.shared.taskGroups = {};
+  return state.data.shared.taskGroups;
+}
+
 function renderBoard() {
   const cols = $('#board-columns');
   cols.innerHTML = '';
@@ -1231,30 +1243,53 @@ function renderBoard() {
     return false;
   });
 
-  const filtered = mine.filter((t) => {
+  const passesFilters = (t) => {
     if (groupFilter === 'all') {}
     else if (groupFilter === 'none') { if (t.group_id) return false; }
     else { if (t.group_id !== groupFilter) return false; }
     if (statusFilter !== 'all' && t.status !== statusFilter) return false;
     if (search && !((t.title || '').toLowerCase().includes(search) || (t.description || '').toLowerCase().includes(search))) return false;
     return true;
-  });
+  };
+
+  const filtered = mine.filter(passesFilters);
+
+  const taskGroups = getTaskGroups();
+  const inGroup = taskGroupsIndex();
+  const saga = (id) => state.data.shared.tasks[id];
 
   const statuses = ['pendiente', 'en_progreso', 'completada'];
   const statusTitles = { pendiente: 'Pendiente', en_progreso: 'En progreso', completada: 'Completada' };
 
   statuses.forEach((st) => {
     const colTasks = filtered.filter((t) => t.status === st);
+    const colGroups = Object.values(taskGroups).filter((g) => {
+      if (g.status !== st) return false;
+      const members = (g.task_ids || []).map(saga).filter(Boolean);
+      if (members.length < 2) return false;
+      const anyVisible = members.some((t) => passesFilters(t));
+      if (!anyVisible) return false;
+      if (search && !(g.name || '').toLowerCase().includes(search)) {
+        if (members.every((t) => !(t.title || '').toLowerCase().includes(search) && !(t.description || '').toLowerCase().includes(search))) return false;
+      }
+      return true;
+    });
+    const loose = colTasks.filter((t) => !inGroup[t.id]);
     const col = el('div', 'board-col');
     col.appendChild(el('div', 'board-col-title', `<span>${statusTitles[st]}</span><span class="count">${colTasks.length}</span>`));
+    const dropArea = el('div', 'board-col-inner');
     if (colTasks.length === 0) col.appendChild(el('div', 'empty-state', '<p style="font-size:12px">Sin tareas</p>'));
-    colTasks.forEach((t) => col.appendChild(taskCard(t)));
+    colGroups.forEach((g) => dropArea.appendChild(taskGroupCard(g)));
+    loose.forEach((t) => dropArea.appendChild(taskCard(t, { loose: true })));
+    col.appendChild(dropArea);
     cols.appendChild(col);
   });
 }
 
-function taskCard(t) {
-  const card = el('div', 'task-card' + (t.due_date && t.due_date < todayStr() && t.status !== 'completada' ? ' overdue' : ''));
+function taskCard(t, opts) {
+  opts = opts || {};
+  const card = el('div', 'task-card' + (opts.loose ? ' loose' : '') + (t.due_date && t.due_date < todayStr() && t.status !== 'completada' ? ' overdue' : ''));
+  card.dataset.tid = t.id;
   const assigneeName = participantName(t.assigned_to);
   card.innerHTML = `
     <div class="title">${esc(t.title || t.description || 'Tarea')}</div>
@@ -1272,6 +1307,240 @@ function taskCard(t) {
   const rwd = card.querySelector('[data-a="rewind"]');
   if (rwd) { const id = t.id; rwd.onclick = () => rewindStatus(id); }
   return card;
+}
+
+/* ===== CARPETAS DE TAREAS (agrupar arrastrando) ===== */
+function taskGroupCard(g) {
+  const card = el('div', 'task-group-card');
+  card.dataset.gid = g.id;
+  const members = (g.task_ids || []).map((id) => state.data.shared.tasks[id]).filter(Boolean);
+  const head = el('div', 'task-group-head');
+  head.innerHTML = `<span class="tgc-icon">📁</span><span class="tgc-name">${esc(g.name || 'Grupo')}</span><span class="tgc-count">${members.length}</span><span class="tgc-chev">▾</span>
+    <span class="tgc-actions"><button class="btn btn-sm btn-outline" data-gact="rename" title="Renombrar">✏️</button><button class="btn btn-sm btn-outline" data-gact="del" title="Eliminar grupo">🗑️</button></span>`;
+  const body = el('div', 'task-group-body hidden');
+  members.forEach((t) => body.appendChild(taskGroupRow(g.id, t)));
+  card.appendChild(head);
+  card.appendChild(body);
+
+  head.addEventListener('click', (e) => {
+    if (e.target.closest('[data-gact]')) return;
+    const collapsed = body.classList.toggle('hidden');
+    head.querySelector('.tgc-chev').textContent = collapsed ? '▸' : '▾';
+    head.classList.toggle('open', !collapsed);
+  });
+  head.querySelector('[data-gact="rename"]').onclick = () => openNameGroupModal(g.name || '', (name) => renameTaskGroup(g.id, name));
+  head.querySelector('[data-gact="del"]').onclick = () => deleteTaskGroup(g.id);
+  return card;
+}
+
+function taskGroupRow(gid, t) {
+  const row = el('div', 'task-group-row');
+  const assigneeName = participantName(t.assigned_to);
+  row.innerHTML = `<div class="tgr-info"><div class="tgr-title">${esc(t.title || 'Tarea')}</div>
+    <div class="meta">${t.due_date ? '📅 ' + esc(t.due_date) + (t.due_time ? ' ⏰ ' + esc(t.due_time) : '') : 'Sin fecha'} ${priorityTag(t.priority || 'media')}</div>
+    ${assigneeName ? `<div class="assigned">👤 ${esc(assigneeName)}</div>` : ''}</div>
+    <div class="tgr-actions">
+      <button class="btn btn-sm btn-outline" data-tact="out" title="Sacar del grupo">⤒</button>
+      <button class="btn btn-sm btn-outline" data-tact="edit" title="Editar">✏️</button>
+      <button class="btn btn-sm btn-outline" data-tact="del" title="Borrar">🗑️</button>
+    </div>`;
+  row.querySelector('[data-tact="out"]').onclick = () => removeTaskFromGroup(gid, t.id);
+  row.querySelector('[data-tact="edit"]').onclick = () => editTaskModal(t.id);
+  row.querySelector('[data-tact="del"]').onclick = () => deleteTask(t.id);
+  return row;
+}
+
+function findTaskGroupOf(taskId) {
+  return Object.keys(getTaskGroups()).find((gid) => (getTaskGroups()[gid].task_ids || []).indexOf(taskId) !== -1) || null;
+}
+
+function openNameGroupModal(initial, onSave) {
+  const root = $('#modal-root');
+  root.innerHTML = '';
+  const backdrop = el('div', 'modal-backdrop center');
+  const modal = el('div', 'modal');
+  modal.innerHTML = `<h3>Nombre del grupo</h3>
+    <div class="field"><label>Nombre</label><input id="tgg-name" value="${esc(initial || '')}" placeholder="Ej: Mudanza, Impuestos, Acciones de casa..."></div>
+    <div class="modal-actions"><button class="btn btn-outline" id="tgg-cancel">Cancelar</button><button class="btn btn-primary" id="tgg-save">Guardar</button></div>`;
+  const cleanup = () => root.innerHTML = '';
+  modal.querySelector('#tgg-cancel').onclick = cleanup;
+  modal.querySelector('#tgg-save').onclick = () => {
+    const name = modal.querySelector('#tgg-name').value.trim();
+    if (!name) return;
+    cleanup();
+    onSave(name);
+  };
+  modal.querySelector('#tgg-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') modal.querySelector('#tgg-save').click(); });
+  modal.querySelector('#tgg-name').focus();
+  backdrop.appendChild(modal);
+  root.appendChild(backdrop);
+}
+
+function dropTaskOnTask(srcId, tgtId) {
+  if (srcId === tgtId) return;
+  const tasks = state.data.shared.tasks;
+  const src = tasks[srcId];
+  const tgt = tasks[tgtId];
+  if (!src || !tgt || src.status !== tgt.status) return;
+  const tgs = getTaskGroups();
+  const inGroup = taskGroupsIndex();
+  if (inGroup[tgtId]) { addTaskToGroup(inGroup[tgtId], srcId); return; }
+  if (inGroup[srcId]) { addTaskToGroup(inGroup[srcId], tgtId); return; }
+  openNameGroupModal('', (name) => {
+    const gid = 'grpt-' + uuid().slice(0, 8);
+    tgs[gid] = { id: gid, name, status: src.status, task_ids: [srcId, tgtId], created_by: currentUser(), created_at: now(), updated_at: now() };
+    gitPush('Agrupar tareas').then((ok) => { if (ok) renderAll(); });
+  });
+}
+
+function addTaskToGroup(gid, taskId) {
+  const g = getTaskGroups()[gid];
+  if (!g) return;
+  const t = state.data.shared.tasks[taskId];
+  if (!t || t.status !== g.status) return;
+  if ((g.task_ids || []).indexOf(taskId) !== -1) return;
+  const src = findTaskGroupOf(taskId);
+  if (src && src !== gid) removeTaskFromGroup(src, taskId, true);
+  g.task_ids.push(taskId);
+  g.updated_at = now();
+  gitPush('Añadir tarea al grupo').then((ok) => { if (ok) renderAll(); });
+}
+
+function removeTaskFromGroup(gid, taskId, silent) {
+  const g = getTaskGroups()[gid];
+  if (!g) return;
+  g.task_ids = (g.task_ids || []).filter((id) => id !== taskId);
+  g.updated_at = now();
+  if (g.task_ids.length < 2) delete getTaskGroups()[gid];
+  if (!silent) gitPush('Sacar tarea del grupo').then((ok) => { if (ok) renderAll(); });
+}
+
+function renameTaskGroup(gid, name) {
+  const g = getTaskGroups()[gid];
+  if (!g) return;
+  g.name = name;
+  g.updated_at = now();
+  gitPush('Renombrar grupo de tareas').then((ok) => { if (ok) renderAll(); });
+}
+
+function deleteTaskGroup(gid) {
+  if (!confirm('¿Eliminar este grupo? Sus tareas quedarán sueltas.')) return;
+  delete getTaskGroups()[gid];
+  gitPush('Eliminar grupo de tareas').then((ok) => { if (ok) renderAll(); });
+}
+
+/* ===== ARRASTRAR TAREAS (crear/añadir a carpetas) ===== */
+let dragState = null;
+
+function initBoardDrag() {
+  document.addEventListener('pointerdown', boardPointerDown, true);
+  document.addEventListener('pointermove', boardPointerMove, true);
+  document.addEventListener('pointerup', boardPointerEnd, true);
+  document.addEventListener('pointercancel', boardPointerEnd, true);
+}
+
+function boardPointerDown(e) {
+  if (!state.user || !state.data) return;
+  if (!e.target || !e.target.closest) return;
+  const src = e.target.closest('.task-card.loose');
+  if (!src) return;
+  if (e.target.closest('button, a, input, select, textarea')) return;
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  dragState = {
+    id: src.dataset.tid,
+    srcEl: src,
+    pointerId: e.pointerId,
+    startX: e.clientX,
+    startY: e.clientY,
+    lastX: e.clientX,
+    lastY: e.clientY,
+    active: false,
+    targetEl: null,
+    timer: null,
+  };
+  if (e.pointerType !== 'mouse') {
+    dragState.timer = setTimeout(() => startBoardDrag(), 360);
+  }
+}
+
+function boardPointerMove(e) {
+  if (!dragState || e.pointerId !== dragState.pointerId) return;
+  dragState.lastX = e.clientX;
+  dragState.lastY = e.clientY;
+  if (!dragState.active) {
+    const dx = e.clientX - dragState.startX;
+    const dy = e.clientY - dragState.startY;
+    if (Math.hypot(dx, dy) > 6) {
+      clearTimeout(dragState.timer);
+      if (e.pointerType === 'mouse') startBoardDrag();
+      else cancelBoardDrag();
+      return;
+    }
+    return;
+  }
+  if (e.cancelable) e.preventDefault();
+  const ghost = dragState.ghost;
+  ghost.style.left = (e.clientX + 12) + 'px';
+  ghost.style.top = (e.clientY + 12) + 'px';
+  highlightDropTarget(e.clientX, e.clientY);
+}
+
+function startBoardDrag() {
+  if (!dragState || dragState.active) return;
+  dragState.active = true;
+  clearTimeout(dragState.timer);
+  const t = state.data.shared.tasks[dragState.id];
+  dragState.ghost = el('div', 'drag-ghost', esc(t && (t.title || 'Tarea')));
+  document.body.appendChild(dragState.ghost);
+  dragState.srcEl.classList.add('drag-source');
+  document.body.classList.add('dragging');
+  dragState.ghost.style.left = (dragState.lastX + 12) + 'px';
+  dragState.ghost.style.top = (dragState.lastY + 12) + 'px';
+}
+
+function highlightDropTarget(x, y) {
+  const elUnder = document.elementFromPoint(x, y);
+  let targetEl = null;
+  if (elUnder && !dragState.srcEl.contains(elUnder)) {
+    targetEl = elUnder.closest('.task-card.loose, .task-group-card');
+  }
+  if (targetEl) {
+    const dstCol = targetEl.closest('.board-col');
+    const srcCol = dragState.srcEl.closest('.board-col');
+    if (!dstCol || dstCol !== srcCol) targetEl = null;
+  }
+  if (dragState.targetEl && dragState.targetEl !== targetEl) dragState.targetEl.classList.remove('drop-target');
+  if (targetEl) targetEl.classList.add('drop-target');
+  dragState.targetEl = targetEl;
+}
+
+function endBoardDragVisuals() {
+  if (dragState.ghost && dragState.ghost.parentNode) dragState.ghost.parentNode.removeChild(dragState.ghost);
+  if (dragState.srcEl) dragState.srcEl.classList.remove('drag-source');
+  if (dragState.targetEl) dragState.targetEl.classList.remove('drop-target');
+  document.body.classList.remove('dragging');
+}
+
+function cancelBoardDrag() {
+  clearTimeout(dragState.timer);
+  endBoardDragVisuals();
+  dragState = null;
+}
+
+function boardPointerEnd(e) {
+  if (!dragState || e.pointerId !== dragState.pointerId) return;
+  clearTimeout(dragState.timer);
+  if (!dragState.active) { endBoardDragVisuals(); dragState = null; return; }
+  const target = dragState.targetEl;
+  const srcId = dragState.id;
+  endBoardDragVisuals();
+  dragState = null;
+  if (!target) return;
+  if (target.classList.contains('task-group-card')) {
+    addTaskToGroup(target.dataset.gid, srcId);
+  } else if (target.classList.contains('task-card')) {
+    dropTaskOnTask(srcId, target.dataset.tid);
+  }
 }
 
 function advanceBtn(t) {
@@ -1339,6 +1608,7 @@ function buildAssigneeOptions(groups) {
 function editTaskModal(id) {
   const t = state.data.shared.tasks[id];
   if (!t) return;
+  const origStatus = t.status;
   const root = $('#modal-root');
   root.innerHTML = '';
   const backdrop = el('div', 'modal-backdrop center');
@@ -1388,6 +1658,8 @@ function editTaskModal(id) {
     t.group_id = modal.querySelector('#e-group').value || null;
     t.assigned_to = modal.querySelector('#e-assignee').value || null;
     t.updated_at = now();
+    const gid = findTaskGroupOf(id);
+    if (gid && t.status !== origStatus) removeTaskFromGroup(gid, id, true);
     root.innerHTML = '';
     if (await gitPush('Editar tarea ' + id)) { renderAll(); }
   };
@@ -1628,6 +1900,9 @@ function wireEvents() {
   $('#filter-status').onchange = renderBoard;
   $('#filter-group').onchange = renderBoard;
   $('#board-search').oninput = renderBoard;
+
+  // Drag & drop para agrupar tareas en el tablero
+  initBoardDrag();
 
   // Groups
   $('#btn-new-group').onclick = newGroupModal;
