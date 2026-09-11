@@ -20,26 +20,44 @@
       <h1>Mis Tareas</h1>
       <p class="tagline">Convierte documentos e ideas en tareas reales</p>
 
-      <div class="field">
-        <label>Pat de GitHub</label>
-        <input type="password" id="github-token" placeholder="ghp_..." autocomplete="off">
-        <p class="hint">Para guardar tus tareas en tu repositorio privado</p>
+      <button id="btn-toggle-login" class="btn btn-outline btn-block" type="button">🔑 Entrar con usuario y contraseña</button>
+
+      <div id="div-creds-login" class="hidden">
+        <div class="field">
+          <label>Usuario</label>
+          <input type="text" id="creds-user" placeholder="el que creaste en Ajustes" autocomplete="username">
+        </div>
+        <div class="field">
+          <label>Contraseña</label>
+          <input type="password" id="creds-pass" placeholder="••••••••" autocomplete="current-password">
+        </div>
+        <button id="btn-creds-login" class="btn btn-primary btn-block">Entrar con clave</button>
+        <div id="creds-error" class="error"></div>
+        <button id="btn-back-technical" class="btn btn-outline btn-block" type="button">« Usar PAT y claves directamente</button>
       </div>
 
-      <div class="field">
-        <label>Clave API de Gemini</label>
-        <input type="password" id="gemini-key" placeholder="AIzaSy..." autocomplete="off">
-        <p class="hint">Gratis en <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com</a></p>
-      </div>
+      <div id="div-technical-login">
+        <div class="field">
+          <label>Pat de GitHub</label>
+          <input type="password" id="github-token" placeholder="ghp_..." autocomplete="off">
+          <p class="hint">Para guardar tus tareas en tu repositorio privado</p>
+        </div>
 
-      <div class="field">
-        <label>Repo de GitHub (owner/repo)</label>
-        <input type="text" id="github-repo" placeholder="tuusuario/mis-tareas">
-        <p class="hint">Repo donde se guardan los datos compartidos</p>
-      </div>
+        <div class="field">
+          <label>Clave API de Gemini</label>
+          <input type="password" id="gemini-key" placeholder="AIzaSy..." autocomplete="off">
+          <p class="hint">Gratis en <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com</a></p>
+        </div>
 
-      <button id="btn-login" class="btn btn-primary btn-block">Entrar</button>
-      <div id="login-error" class="error"></div>
+        <div class="field">
+          <label>Repo de GitHub (owner/repo)</label>
+          <input type="text" id="github-repo" placeholder="tuusuario/mis-tareas">
+          <p class="hint">Repo donde se guardan los datos compartidos</p>
+        </div>
+
+        <button id="btn-login" class="btn btn-primary btn-block">Entrar</button>
+        <div id="login-error" class="error"></div>
+      </div>
     </div>
   </section>
 
@@ -179,6 +197,15 @@
           </select>
         </div>
         <button id="btn-save-settings" class="btn btn-primary">Guardar</button>
+        <div class="settings-item">
+          <label>Acceso por usuario y contraseña</label>
+          <p class="hint">Crea tu clave: se guarda CIFRADA (con tu contraseña) en el repo de la app, así entras desde cualquier dispositivo solo con usuario y contraseña. Usa una contraseña larga; si la olvidas, vuelve a crearla aquí.</p>
+          <input type="text" id="set-creds-user" placeholder="Usuario (p. ej. juan)" autocomplete="off">
+          <input type="password" id="set-creds-pass" placeholder="Nueva contraseña (mín. 6 caracteres)" autocomplete="new-password">
+          <input type="password" id="set-creds-confirm" placeholder="Repite la contraseña" autocomplete="new-password">
+          <button id="btn-set-creds" class="btn btn-primary" style="margin-top:6px">Crear / actualizar clave de acceso</button>
+          <div id="set-creds-status" class="hint"></div>
+        </div>
         <div class="settings-item calendar">
           <label>Google Calendar</label>
           <p class="hint">Añade tareas aceptadas con fecha a tu calendario. Requiere configurar OAuth en Google Cloud (en desarrollo).</p>
