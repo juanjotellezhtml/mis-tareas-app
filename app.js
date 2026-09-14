@@ -1445,9 +1445,16 @@ function boardTouchMove(e) {
   e.preventDefault();
   const t = (e.touches && e.touches[0]) || e.changedTouches[0];
   if (!t) return;
-  dragState.ghost.style.left = (t.clientX + 12) + 'px';
-  dragState.ghost.style.top = (t.clientY + 12) + 'px';
-  highlightDropTarget(t.clientX, t.clientY);
+  dragMoveTo(t.clientX, t.clientY);
+}
+
+function dragMoveTo(x, y) {
+  const ghost = dragState.ghost;
+  ghost.style.left = (x + 16) + 'px';
+  ghost.style.top = (y - 58) + 'px';
+  dragState.lastX = x;
+  dragState.lastY = y;
+  highlightDropTarget(x, y);
 }
 
 function boardPointerDown(e) {
@@ -1481,7 +1488,7 @@ function boardPointerMove(e) {
   if (!dragState.active) {
     const dx = e.clientX - dragState.startX;
     const dy = e.clientY - dragState.startY;
-    if (Math.hypot(dx, dy) > 6) {
+    if (Math.hypot(dx, dy) > 10) {
       clearTimeout(dragState.timer);
       if (e.pointerType === 'mouse') startBoardDrag();
       else cancelBoardDrag();
@@ -1490,10 +1497,7 @@ function boardPointerMove(e) {
     return;
   }
   if (e.cancelable) e.preventDefault();
-  const ghost = dragState.ghost;
-  ghost.style.left = (e.clientX + 12) + 'px';
-  ghost.style.top = (e.clientY + 12) + 'px';
-  highlightDropTarget(e.clientX, e.clientY);
+  dragMoveTo(e.clientX, e.clientY);
 }
 
 function startBoardDrag() {
@@ -1502,28 +1506,47 @@ function startBoardDrag() {
   clearTimeout(dragState.timer);
   if (navigator.vibrate) navigator.vibrate(15);
   const t = state.data.shared.tasks[dragState.id];
-  dragState.ghost = el('div', 'drag-ghost', esc(t && (t.title || 'Tarea')));
+  dragState.ghost = el('div', 'drag-ghost', `<b>${esc(t && (t.title || 'Tarea'))}</b><div class="drag-hint">Suéltala sobre otra tarea o carpeta</div>`);
   document.body.appendChild(dragState.ghost);
   dragState.srcEl.classList.add('drag-source');
   document.body.classList.add('dragging');
-  dragState.ghost.style.left = (dragState.lastX + 12) + 'px';
-  dragState.ghost.style.top = (dragState.lastY + 12) + 'px';
+  dragState.ghost.style.left = (dragState.lastX + 16) + 'px';
+  dragState.ghost.style.top = (dragState.lastY - 58) + 'px';
 }
 
 function highlightDropTarget(x, y) {
-  const elUnder = document.elementFromPoint(x, y);
-  let targetEl = null;
-  if (elUnder && !dragState.srcEl.contains(elUnder)) {
-    targetEl = elUnder.closest('.task-card.loose, .task-group-card');
-  }
-  if (targetEl) {
-    const dstCol = targetEl.closest('.board-col');
-    const srcCol = dragState.srcEl.closest('.board-col');
-    if (!dstCol || dstCol !== srcCol) targetEl = null;
-  }
+  let targetEl = findDropTargetNear(x, y);
   if (dragState.targetEl && dragState.targetEl !== targetEl) dragState.targetEl.classList.remove('drop-target');
   if (targetEl) targetEl.classList.add('drop-target');
   dragState.targetEl = targetEl;
+}
+
+function findDropTargetNear(x, y) {
+  const offsets = [[0, 0], [24, 0], [-24, 0], [0, 24], [0, -24], [24, 24], [-24, -24]];
+  const srcCol = dragState.srcEl.closest('.board-col');
+  for (const [dx, dy] of offsets) {
+    const elUnder = document.elementFromPoint(x + dx, y + dy);
+    if (!elUnder || dragState.srcEl.contains(elUnder)) continue;
+    const t = elUnder.closest('.task-card.loose, .task-group-card');
+    if (t && srcCol && t.closest('.board-col') === srcCol) return t;
+  }
+  return findNearestCandidate(x, y);
+}
+
+function findNearestCandidate(x, y) {
+  const srcCol = dragState.srcEl.closest('.board-col');
+  if (!srcCol) return null;
+  const candidates = srcCol.querySelectorAll('.task-card.loose, .task-group-card');
+  let best = null, bestDist = Infinity;
+  candidates.forEach((c) => {
+    if (c === dragState.srcEl) return;
+    const r = c.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const d = Math.hypot(cx - x, cy - y);
+    if (d < bestDist) { bestDist = d; best = c; }
+  });
+  return bestDist < 140 ? best : null;
 }
 
 function endBoardDragVisuals() {
