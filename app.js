@@ -1437,6 +1437,17 @@ function initBoardDrag() {
   document.addEventListener('pointermove', boardPointerMove, true);
   document.addEventListener('pointerup', boardPointerEnd, true);
   document.addEventListener('pointercancel', boardPointerEnd, true);
+  document.addEventListener('touchmove', boardTouchMove, { passive: false, capture: true });
+}
+
+function boardTouchMove(e) {
+  if (!dragState || !dragState.active) return;
+  e.preventDefault();
+  const t = (e.touches && e.touches[0]) || e.changedTouches[0];
+  if (!t) return;
+  dragState.ghost.style.left = (t.clientX + 12) + 'px';
+  dragState.ghost.style.top = (t.clientY + 12) + 'px';
+  highlightDropTarget(t.clientX, t.clientY);
 }
 
 function boardPointerDown(e) {
@@ -1459,7 +1470,7 @@ function boardPointerDown(e) {
     timer: null,
   };
   if (e.pointerType !== 'mouse') {
-    dragState.timer = setTimeout(() => startBoardDrag(), 360);
+    dragState.timer = setTimeout(() => startBoardDrag(), 300);
   }
 }
 
@@ -1489,6 +1500,7 @@ function startBoardDrag() {
   if (!dragState || dragState.active) return;
   dragState.active = true;
   clearTimeout(dragState.timer);
+  if (navigator.vibrate) navigator.vibrate(15);
   const t = state.data.shared.tasks[dragState.id];
   dragState.ghost = el('div', 'drag-ghost', esc(t && (t.title || 'Tarea')));
   document.body.appendChild(dragState.ghost);
